@@ -699,7 +699,10 @@ function renderEdit(){
       <h2>Key timings</h2>
       <div class="card-sub">These are your anchors — change one here and every runsheet item linked to it updates automatically.</div>
       <div id="anchorList"></div>
-      <button class="btn btn-ghost add-row-btn" id="addAnchorBtn">+ Add key timing</button>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; margin-top:4px;">
+        <button class="btn btn-ghost" id="addAnchorBtn" style="flex:1;">+ Add key timing</button>
+        <button class="btn btn-ghost" id="syncAnchorItemsBtn" title="Add a runsheet row for any key timing above that doesn't have one yet">↻ Add missing timings to runsheet</button>
+      </div>
     </div>
     <div class="card" id="itemsCard">
       <h2>Runsheet</h2>
@@ -729,6 +732,17 @@ function renderEdit(){
     state.anchors.push(newAnchor);
     state.items.push(itemForAnchor(newAnchor));
     renderAnchors(); renderItemsEdit(); scheduleSave();
+  };
+  document.getElementById('syncAnchorItemsBtn').onclick = ()=>{
+    const missing = state.anchors.filter(a => !state.items.some(it => it.mode==='anchor' && it.anchorId===a.id));
+    if(missing.length===0){
+      alert('Every key timing already has a matching row in the runsheet.');
+      return;
+    }
+    missing.forEach(a => state.items.push(itemForAnchor(a)));
+    renderItemsEdit();
+    scheduleSave();
+    alert(`Added ${missing.length} runsheet row${missing.length>1?'s':''} for: ${missing.map(a=>a.label).join(', ')}`);
   };
   document.getElementById('addItemBtn').onclick = ()=>{
     state.items.push({id:uid('i'), mode:'fixed', fixedTime:'', anchorId:(state.anchors[0]?state.anchors[0].id:''), offsetMin:0, action:'', where:'', who:'', milestone:false});
