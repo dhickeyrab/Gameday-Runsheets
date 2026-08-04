@@ -532,10 +532,27 @@ async function flushSave(){
   await doSave();
 }
 
+// Makes sure every key timing has a matching runsheet row. Called
+// whenever a week loads, so older weeks (saved before this existed,
+// or edited from a not-yet-updated copy of this file) self-heal
+// instead of needing a manual fix.
+function ensureAnchorItems(s){
+  const missing = s.anchors.filter(a => !s.items.some(it => it.mode==='anchor' && it.anchorId===a.id));
+  if(missing.length>0) missing.forEach(a => s.items.push(itemForAnchor(a)));
+  return missing.length>0;
+}
+
 async function loadWeekState(id){
   try{
     const r = await storageGet(weekKey(id));
-    if(r && r.value) return JSON.parse(r.value);
+    if(r && r.value){
+      const parsed = JSON.parse(r.value);
+      if(ensureAnchorItems(parsed)){
+        // Save the backfill quietly so it sticks for next time / other devices.
+        storageSet(weekKey(id), JSON.stringify(parsed)).catch(e=>console.error(e));
+      }
+      return parsed;
+    }
   }catch(e){ /* fall through */ }
   return blankWeekState();
 }
@@ -562,6 +579,7 @@ async function loadAllWeeks(){
 
     const id = uid('w');
     state = legacy || defaultState();
+    ensureAnchorItems(state);
     weekIndex = [{id, label: weekLabel(state), updatedAt: Date.now()}];
     activeWeekId = id;
     try{ await storageSet(weekKey(id), JSON.stringify(state)); }catch(e){}
