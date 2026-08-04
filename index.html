@@ -370,11 +370,11 @@ let DRAW_AS_OF = '3 Aug 2026 (built-in snapshot)';
 let DRAW_SEASON = '2026';
 let DRAW_SOURCE = 'built-in';
 let SEASON_FIXTURES = [
-  {round:23, opponent:'Eels',      home:true,  date:'Fri 8 Aug 2026',  venue:'Allianz Stadium',   kickoff:'19:35'},
-  {round:24, opponent:'Bulldogs',  home:false, date:'Fri 14 Aug 2026', venue:'Accor Stadium',     kickoff:'20:00'},
-  {round:25, opponent:'Warriors',  home:true,  date:'Sat 22 Aug 2026', venue:'Accor Stadium',     kickoff:'17:30'},
-  {round:26, opponent:'Titans',    home:false, date:'Sat 29 Aug 2026', venue:'Cbus Super Stadium',kickoff:'15:00'},
-  {round:27, opponent:'Roosters',  home:true,  date:'Fri 4 Sep 2026',  venue:'Allianz Stadium',   kickoff:'20:00'}
+  {round:23, opponent:'Eels',      home:true,  date:'Fri 8 Aug 2026',  dateISO:'2026-08-08', venue:'Allianz Stadium',   kickoff:'19:35'},
+  {round:24, opponent:'Bulldogs',  home:false, date:'Fri 14 Aug 2026', dateISO:'2026-08-14', venue:'Accor Stadium',     kickoff:'20:00'},
+  {round:25, opponent:'Warriors',  home:true,  date:'Sat 22 Aug 2026', dateISO:'2026-08-22', venue:'Accor Stadium',     kickoff:'17:30'},
+  {round:26, opponent:'Titans',    home:false, date:'Sat 29 Aug 2026', dateISO:'2026-08-29', venue:'Cbus Super Stadium',kickoff:'15:00'},
+  {round:27, opponent:'Roosters',  home:true,  date:'Fri 4 Sep 2026',  dateISO:'2026-09-04', venue:'Allianz Stadium',   kickoff:'20:00'}
 ];
 
 async function loadDraw(){
@@ -630,7 +630,7 @@ async function loadFromDraw(roundNum){
     opponent: fx.opponent,
     round: 'Round ' + fx.round,
     venue: fx.venue,
-    dateStr: fx.date
+    dateStr: fx.dateISO || fx.date
   };
   const ko = newState.anchors.find(a=>a.label==='NRL Kick Off');
   if(ko && fx.kickoff){ ko.time = fx.kickoff; ko.active = true; }
@@ -703,6 +703,49 @@ function computeItemMin(item){
 function nowMin(){
   const d = new Date();
   return d.getHours()*60 + d.getMinutes();
+}
+
+// Turns whatever's in match.dateStr (an ISO "2026-08-08" from the date
+// picker, or an older free-text value like "Fri 8 Aug 2026" saved
+// before this existed) into a clean YYYY-MM-DD, or '' if it can't tell.
+function toISODate(str){
+  if(!str) return '';
+  if(/^\d{4}-\d{2}-\d{2}$/.test(str)) return str;
+  const d = new Date(str);
+  if(isNaN(d.getTime())) return '';
+  return d.getFullYear()+'-'+String(d.getMonth()+1).padStart(2,'0')+'-'+String(d.getDate()).padStart(2,'0');
+}
+function formatDateNice(iso){
+  const clean = toISODate(iso);
+  if(!clean) return '';
+  const d = new Date(clean+'T00:00:00');
+  return d.toLocaleDateString('en-AU', {weekday:'short', day:'numeric', month:'short', year:'numeric'});
+}
+// Midnight of the match day, or null if no date is set yet.
+function matchDayStart(){
+  const iso = toISODate(state.match.dateStr);
+  return iso ? new Date(iso+'T00:00:00') : null;
+}
+// A runsheet item's real date + time. Falls back to "today" if no
+// match date has been set yet, so it still works before that's filled in.
+function itemDateTime(item){
+  const mins = computeItemMin(item);
+  if(mins===null) return null;
+  const base = matchDayStart() || new Date(new Date().toDateString());
+  const dt = new Date(base.getTime());
+  dt.setMinutes(dt.getMinutes()+mins);
+  return dt;
+}
+function formatCountdown(ms){
+  if(ms<0) ms = 0;
+  const totalMin = Math.round(ms/60000);
+  if(totalMin < 60) return `in ${totalMin} min`;
+  const totalHours = Math.floor(totalMin/60);
+  const mins = totalMin%60;
+  if(totalHours < 24) return `in ${totalHours}h ${mins}m`;
+  const days = Math.floor(totalHours/24);
+  const hours = totalHours%24;
+  return `in ${days}d ${hours}h`;
 }
 
 /* ============================================================
@@ -840,7 +883,7 @@ function renderMatchCard(){
       <div class="field"><label>Opponent</label><input type="text" id="mOpp" value="${escAttr(state.match.opponent)}"></div>
       <div class="field"><label>Round</label><input type="text" id="mRound" value="${escAttr(state.match.round)}"></div>
       <div class="field"><label>Venue</label><input type="text" id="mVenue" value="${escAttr(state.match.venue)}"></div>
-      <div class="field"><label>Date</label><input type="text" id="mDate" placeholder="e.g. Sat 8 Aug" value="${escAttr(state.match.dateStr)}"></div>
+      <div class="field"><label>Date</label><input type="date" id="mDate" value="${escAttr(toISODate(state.match.dateStr))}"></div>
     </div>
   `;
   ['mOpp','mRound','mVenue','mDate'].forEach(id=>{
@@ -1020,19 +1063,21 @@ function renderPackEdit(){
 ============================================================ */
 function renderGameday(){
   const app = document.getElementById('app');
-  const now = nowMin();
+  const nowDt = new Date();
 
   const sortable = state.items
-    .map(it=>({it, mins:computeItemMin(it)}))
-    .filter(x=>x.mins!==null)
-    .sort((a,b)=>a.mins-b.mins);
+    .map(it=>({it, mins:computeItemMin(it), dt:itemDateTime(it)}))
+    .filter(x=>x.dt!==null)
+    .sort((a,b)=>a.dt-b.dt);
 
-  // find current (last item at/before now) and next (first after now)
+  // find current (last item at/before now) and next (first after now) —
+  // compared as real date+time, so this stays correct in the days
+  // leading up to the match, not just on the day itself.
   let currentIdx = -1;
   for(let i=0;i<sortable.length;i++){
-    if(sortable[i].mins<=now) currentIdx = i;
+    if(sortable[i].dt<=nowDt) currentIdx = i;
   }
-  const nextEntry = sortable.find(x=>x.mins>now);
+  const nextEntry = sortable.find(x=>x.dt>nowDt);
 
   app.innerHTML = `
     <div class="gd-clock-bar">
@@ -1044,7 +1089,7 @@ function renderGameday(){
         ${nextEntry ? `
           <div class="eyebrow">Next up</div>
           <div class="next-name">${escHtml(firstLine(nextEntry.it.action)||'—')}</div>
-          <div class="next-time">${fromMin(nextEntry.mins)} · in ${nextEntry.mins-now} min</div>
+          <div class="next-time">${fromMin(nextEntry.mins)} · ${formatCountdown(nextEntry.dt-nowDt)}</div>
         ` : `<div class="eyebrow">That's the last item on the sheet</div>`}
       </div>
     </div>
@@ -1132,7 +1177,7 @@ function updateHeader(){
   const m = state.match;
   const title = [m.round, m.opponent ? ('vs '+m.opponent) : ''].filter(Boolean).join(' ') || 'Gameday Runsheet';
   document.getElementById('hdrTitle').textContent = title || 'Gameday Runsheet';
-  document.getElementById('hdrSub').textContent = [m.venue, m.dateStr].filter(Boolean).join(' · ') || '— · —';
+  document.getElementById('hdrSub').textContent = [m.venue, formatDateNice(m.dateStr)].filter(Boolean).join(' · ') || '— · —';
 }
 
 function setMode(newMode){
