@@ -367,6 +367,7 @@ async function storageDelete(key, forceLocal){
    back to the snapshot embedded below so the page still works.
 ------------------------------------------------------------ */
 let DRAW_AS_OF = '3 Aug 2026 (built-in snapshot)';
+let DRAW_SEASON = '2026';
 let DRAW_SOURCE = 'built-in';
 let SEASON_FIXTURES = [
   {round:23, opponent:'Eels',      home:true,  date:'Fri 8 Aug 2026',  venue:'Allianz Stadium',   kickoff:'19:35'},
@@ -384,6 +385,7 @@ async function loadDraw(){
     if(!Array.isArray(data.fixtures) || data.fixtures.length===0) throw new Error('draw.json had no fixtures');
     SEASON_FIXTURES = data.fixtures;
     DRAW_AS_OF = data.asOf || 'unknown date';
+    DRAW_SEASON = data.season || '';
     DRAW_SOURCE = 'draw.json';
   }catch(e){
     // Quietly keep the built-in snapshot — this is expected if draw.json
@@ -400,22 +402,39 @@ function weekLabel(s){
 }
 
 function blankWeekState(){
+  const anchors = [
+    {id:uid('a'), label:'Jersey Flegg', time:'', active:false},
+    {id:uid('a'), label:'NSW Cup (KOE Cup)', time:'', active:false},
+    {id:uid('a'), label:'NRL Kick Off', time:'', active:true},
+    {id:uid('a'), label:'Gates', time:'', active:true},
+    {id:uid('a'), label:'Corporate Gates', time:'', active:true},
+    {id:uid('a'), label:'Production Meeting', time:'', active:true},
+    {id:uid('a'), label:'Rehearsal & Sound Check', time:'', active:true},
+    {id:uid('a'), label:'Content Check', time:'', active:true},
+    {id:uid('a'), label:'Darcy Arrives', time:'', active:true},
+    {id:uid('a'), label:'Signage Team Arrive', time:'', active:true}
+  ];
   return {
     match:{ opponent:'', round:'', venue:'', dateStr:'' },
-    anchors:[
-      {id:uid('a'), label:'Jersey Flegg', time:'', active:false},
-      {id:uid('a'), label:'NSW Cup (KOE Cup)', time:'', active:false},
-      {id:uid('a'), label:'NRL Kick Off', time:'', active:true},
-      {id:uid('a'), label:'Gates', time:'', active:true},
-      {id:uid('a'), label:'Corporate Gates', time:'', active:true},
-      {id:uid('a'), label:'Production Meeting', time:'', active:true},
-      {id:uid('a'), label:'Rehearsal & Sound Check', time:'', active:true},
-      {id:uid('a'), label:'Content Check', time:'', active:true},
-      {id:uid('a'), label:'Darcy Arrives', time:'', active:true},
-      {id:uid('a'), label:'Signage Team Arrive', time:'', active:true}
-    ],
-    items:[],
+    anchors,
+    items: anchors.map(a=>itemForAnchor(a)),
     packing:[]
+  };
+}
+
+// A runsheet row that just tracks a key timing, so every key timing
+// shows up in the runsheet (and gameday view) without extra steps.
+function itemForAnchor(anchor){
+  return {
+    id: uid('i'),
+    mode: 'anchor',
+    fixedTime: '',
+    anchorId: anchor.id,
+    offsetMin: 0,
+    action: anchor.label,
+    where: '',
+    who: '',
+    milestone: true
   };
 }
 
@@ -706,8 +725,10 @@ function renderEdit(){
   renderPackEdit();
 
   document.getElementById('addAnchorBtn').onclick = ()=>{
-    state.anchors.push({id:uid('a'), label:'New timing', time:'', active:true});
-    renderAnchors(); refreshComputedBadges(); scheduleSave();
+    const newAnchor = {id:uid('a'), label:'New timing', time:'', active:true};
+    state.anchors.push(newAnchor);
+    state.items.push(itemForAnchor(newAnchor));
+    renderAnchors(); renderItemsEdit(); scheduleSave();
   };
   document.getElementById('addItemBtn').onclick = ()=>{
     state.items.push({id:uid('i'), mode:'fixed', fixedTime:'', anchorId:(state.anchors[0]?state.anchors[0].id:''), offsetMin:0, action:'', where:'', who:'', milestone:false});
@@ -753,7 +774,7 @@ function renderWeekSwitcher(){
       <label>Load from NRL draw</label>
       <div class="card-sub" style="margin-bottom:8px;" id="drawStatusNote">
         ${DRAW_SOURCE==='draw.json'
-          ? `Synced from draw.json — as of ${escHtml(DRAW_AS_OF)}.`
+          ? `Synced from draw.json — ${DRAW_SEASON ? DRAW_SEASON+' season, ' : ''}as of ${escHtml(DRAW_AS_OF)}.`
           : `Using the built-in snapshot (as of ${escHtml(DRAW_AS_OF)}) — add a draw.json file next to this page to update fixtures without touching the code.`}
       </div>
       <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
