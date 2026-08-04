@@ -1,0 +1,1135 @@
+<!DOCTYPE html>
+<!--
+  GAMEDAY RUNSHEET — SET UP CLOUD SYNC (SO YOUR TEAM SHARES ONE COPY)
+  ---------------------------------------------------------------------
+  Without this, the page still works, but each device/browser keeps
+  its own separate copy. To share weeks across everyone's phones and
+  laptops, set up a free Supabase project (about 10 minutes, no
+  coding, no credit card):
+
+  1. Go to https://supabase.com, sign in, and create a new project.
+     Pick a region close to you (e.g. Sydney). Set any database
+     password — you won't need it for this.
+  2. Once the project is ready, open the SQL Editor (left sidebar)
+     and run this to create the table this file reads and writes:
+
+       create table kv (
+         key text primary key,
+         value text,
+         updated_at timestamptz default now()
+       );
+       alter table kv enable row level security;
+       create policy "public access" on kv
+         for all using (true) with check (true);
+
+  3. Go to Project Settings > API. Copy the "Project URL" and the
+     "anon public" key.
+  4. In this file, find "const SUPABASE_CONFIG = {" further down and
+     paste the URL and anon key in between the matching quotes.
+  5. Re-upload this file to GitHub Pages / Netlify. Open it — the
+     Weeks panel should show a green "Synced with your team's cloud"
+     badge. Send the link to your teammates; you'll all now see the
+     same weeks.
+
+  Note on the policy above: "using (true) with check (true)" means
+  anyone with your Project URL and anon key can read and write the
+  table — no login step for your team, which is fine for gameday
+  logistics data. Since those values are visible in this file's
+  source once it's deployed anyway, just don't put anything sensitive
+  (passwords, personal details) into the runsheet itself. If you ever
+  want proper per-person logins instead, Supabase Auth can do that,
+  but it's a bigger step than this file sets up.
+-->
+
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1">
+<title>Gameday Runsheet</title>
+<style>
+@import url('https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700;800&family=Space+Mono:wght@400;700&display=swap');
+
+:root{
+  --cardinal:#93132A;
+  --cardinal-dark:#5E0E1D;
+  --myrtle:#0F2E23;
+  --myrtle-light:#1B4536;
+  --cream:#F6F1E4;
+  --paper:#FFFFFF;
+  --ink:#161A17;
+  --ink-soft:#5B6259;
+  --amber:#E3A23B;
+  --line:#DED5C0;
+  --radius:10px;
+}
+*{box-sizing:border-box;}
+html,body{margin:0;padding:0;}
+body{
+  font-family:'Inter',system-ui,-apple-system,sans-serif;
+  background:var(--cream);
+  color:var(--ink);
+  -webkit-font-smoothing:antialiased;
+}
+h1,h2,h3{font-family:'Bebas Neue','Inter',sans-serif; letter-spacing:0.03em; margin:0;}
+.mono{font-family:'Space Mono','Courier New',monospace;}
+
+/* ---------- HEADER ---------- */
+.app-header{
+  background:var(--myrtle);
+  color:var(--cream);
+  padding:18px 20px;
+  position:sticky; top:0; z-index:50;
+  box-shadow:0 2px 10px rgba(0,0,0,0.18);
+}
+.header-row{
+  display:flex; align-items:center; justify-content:space-between; gap:16px; flex-wrap:wrap;
+  max-width:980px; margin:0 auto;
+}
+.club-mark{
+  display:flex; align-items:center; gap:12px;
+}
+.crest{
+  width:38px; height:38px; border-radius:50%;
+  background:var(--cardinal);
+  display:flex; align-items:center; justify-content:center;
+  font-family:'Bebas Neue'; font-size:17px; color:var(--cream);
+  border:2px solid var(--amber); flex-shrink:0;
+}
+.title-block h1{font-size:26px; line-height:1; color:var(--cream);}
+.title-block .subline{font-size:12.5px; color:#C9D3CB; margin-top:3px; font-family:'Space Mono',monospace; letter-spacing:0.02em;}
+.mode-toggle{
+  display:flex; background:rgba(255,255,255,0.08); border-radius:999px; padding:3px;
+  border:1px solid rgba(255,255,255,0.18);
+}
+.mode-toggle button{
+  border:none; background:transparent; color:#C9D3CB; font-family:'Inter'; font-weight:700;
+  font-size:13px; padding:8px 16px; border-radius:999px; cursor:pointer; letter-spacing:0.02em;
+  transition:background .15s ease, color .15s ease;
+}
+.mode-toggle button.active{background:var(--cardinal); color:#fff;}
+
+/* ---------- LAYOUT ---------- */
+.wrap{max-width:980px; margin:0 auto; padding:22px 18px 80px;}
+.card{
+  background:var(--paper); border:1px solid var(--line); border-radius:var(--radius);
+  padding:20px; margin-bottom:18px;
+}
+.card h2{font-size:21px; color:var(--cardinal-dark); margin-bottom:2px;}
+.card .card-sub{font-size:12.5px; color:var(--ink-soft); margin-bottom:14px;}
+.field-row{display:flex; gap:12px; flex-wrap:wrap;}
+.field{flex:1; min-width:150px; margin-bottom:10px;}
+label{display:block; font-size:11.5px; font-weight:700; text-transform:uppercase; letter-spacing:0.05em; color:var(--ink-soft); margin-bottom:5px;}
+input[type=text], input[type=time], input[type=number], textarea, select{
+  width:100%; font-family:'Inter'; font-size:14.5px; padding:9px 10px;
+  border:1.5px solid var(--line); border-radius:7px; background:#FCFAF4; color:var(--ink);
+}
+textarea{resize:vertical; min-height:54px; line-height:1.4;}
+input:focus, textarea:focus, select:focus{outline:none; border-color:var(--cardinal); background:#fff;}
+.btn{
+  border:none; border-radius:7px; padding:9px 15px; font-family:'Inter'; font-weight:700; font-size:13px;
+  cursor:pointer; letter-spacing:0.01em; display:inline-flex; align-items:center; gap:6px;
+}
+.btn-primary{background:var(--cardinal); color:#fff;}
+.btn-primary:hover{background:var(--cardinal-dark);}
+.btn-ghost{background:transparent; color:var(--cardinal-dark); border:1.5px solid var(--line);}
+.btn-ghost:hover{border-color:var(--cardinal-dark);}
+.btn-icon{background:transparent; border:none; cursor:pointer; color:var(--ink-soft); font-size:15px; padding:4px 7px; border-radius:6px;}
+.btn-icon:hover{background:#F0EAD8; color:var(--cardinal-dark);}
+.btn-danger:hover{color:#93132A;}
+
+/* Anchors */
+.anchor-row{display:grid; grid-template-columns:auto 1fr 110px 90px 34px; gap:10px; align-items:center; padding:8px 0; border-bottom:1px solid var(--line);}
+.anchor-row:last-child{border-bottom:none;}
+.anchor-active{display:flex; align-items:center; justify-content:center;}
+.anchor-active input{width:18px; height:18px; accent-color:var(--cardinal);}
+
+/* Items (edit) */
+.item-edit{border:1.5px solid var(--line); border-radius:9px; padding:14px; margin-bottom:12px; background:#FCFAF4; position:relative;}
+.item-edit-top{display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;}
+.item-time-badge{
+  font-family:'Space Mono'; font-weight:700; font-size:14px; background:var(--myrtle); color:var(--cream);
+  padding:4px 10px; border-radius:6px;
+}
+.item-time-badge.na{background:#B9AF98; color:#4C4636;}
+.item-controls{display:flex; gap:6px; align-items:center;}
+.time-mode-row{display:flex; gap:10px; flex-wrap:wrap; margin-bottom:10px;}
+.time-mode-row .field{min-width:130px;}
+.milestone-toggle{display:flex; align-items:center; gap:7px; font-size:12.5px; color:var(--ink-soft); margin-top:6px;}
+.milestone-toggle input{accent-color:var(--amber); width:16px; height:16px;}
+.who-where-row{display:flex; gap:10px; margin-top:10px;}
+
+/* Packing list edit */
+.pack-row{display:flex; gap:8px; align-items:center; margin-bottom:8px;}
+.pack-row input[type=text]{flex:1;}
+
+.add-row-btn{width:100%; margin-top:4px;}
+
+/* ---------- GAMEDAY VIEW ---------- */
+.gd-clock-bar{
+  background:var(--myrtle-light); color:var(--cream); border-radius:var(--radius);
+  padding:16px 20px; margin-bottom:18px; display:flex; justify-content:space-between; align-items:center; flex-wrap:wrap; gap:12px;
+}
+.gd-clock{font-family:'Space Mono'; font-size:34px; font-weight:700; letter-spacing:0.02em;}
+.gd-next{text-align:right;}
+.gd-next .eyebrow{font-size:11px; text-transform:uppercase; letter-spacing:0.08em; color:var(--amber); font-weight:700;}
+.gd-next .next-name{font-size:16px; font-weight:700;}
+.gd-next .next-time{font-family:'Space Mono'; font-size:13px; color:#C9D3CB;}
+
+.timeline{position:relative; padding-left:2px;}
+.gd-item{
+  display:flex; gap:14px; padding:14px 0; border-bottom:1px solid var(--line);
+}
+.gd-item:last-child{border-bottom:none;}
+.gd-time{
+  font-family:'Space Mono'; font-weight:700; font-size:16px; min-width:64px; flex-shrink:0; padding-top:2px; color:var(--myrtle);
+}
+.gd-body{flex:1;}
+.gd-action{font-size:15.5px; font-weight:600; white-space:pre-line; line-height:1.45;}
+.gd-meta{font-size:12.5px; color:var(--ink-soft); margin-top:3px;}
+.gd-meta span{margin-right:12px;}
+.gd-item.past{opacity:0.42;}
+.gd-item.past .gd-action{text-decoration:line-through; text-decoration-color:var(--ink-soft);}
+.gd-item.now{
+  background:linear-gradient(90deg, rgba(227,162,59,0.16), transparent);
+  border-left:4px solid var(--amber); margin-left:-18px; padding-left:14px; border-radius:6px;
+}
+.gd-item.now .gd-time{color:var(--cardinal-dark);}
+.now-tag{
+  display:inline-block; background:var(--amber); color:#3A2A08; font-size:10px; font-weight:800;
+  letter-spacing:0.05em; padding:2px 7px; border-radius:4px; margin-left:8px; vertical-align:middle;
+}
+.gd-item.milestone{
+  background:var(--cardinal); color:#fff; border-radius:8px; margin:6px 0; padding:14px 16px; border-bottom:none;
+}
+.gd-item.milestone .gd-time{color:var(--amber);}
+.gd-item.milestone .gd-action{font-family:'Bebas Neue'; font-size:20px; letter-spacing:0.03em; text-transform:uppercase;}
+.gd-item.milestone .gd-meta{color:#EBD9DC;}
+.gd-item.milestone.past{opacity:0.5;}
+
+.gd-pack{margin-top:6px;}
+.gd-pack-row{display:flex; align-items:center; gap:10px; padding:7px 0; border-bottom:1px solid var(--line); font-size:14.5px;}
+.gd-pack-row:last-child{border-bottom:none;}
+.gd-pack-row input{width:18px; height:18px; accent-color:var(--cardinal);}
+.gd-pack-row.checked span{text-decoration:line-through; color:var(--ink-soft);}
+
+.empty-state{text-align:center; padding:30px 10px; color:var(--ink-soft); font-size:13.5px;}
+
+.footer-actions{display:flex; justify-content:space-between; align-items:center; margin-top:6px; flex-wrap:wrap; gap:10px;}
+.save-note{font-size:11.5px; color:var(--ink-soft); font-family:'Space Mono';}
+.clear-link{font-size:12px; color:var(--ink-soft); background:none; border:none; text-decoration:underline; cursor:pointer;}
+.clear-link:hover{color:var(--cardinal);}
+
+@media (max-width:560px){
+  .anchor-row{grid-template-columns:auto 1fr 90px 34px; }
+  .anchor-active{grid-row:1; grid-column:4;}
+  .who-where-row{flex-direction:column;}
+  .gd-clock{font-size:26px;}
+}
+
+@media print{
+  .app-header, .mode-toggle, .btn, .footer-actions, .gd-clock-bar{display:none !important;}
+  body{background:#fff;}
+  .card{border:none; padding:0;}
+  .gd-item.now{background:none; border-left:3px solid #000;}
+}
+</style>
+<!-- Only used if you fill in SUPABASE_CONFIG further down — safe to leave in either way. -->
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.js"></script>
+</head>
+<body>
+
+<div class="app-header">
+  <div class="header-row">
+    <div class="club-mark">
+      <div class="crest">SS</div>
+      <div class="title-block">
+        <h1 id="hdrTitle">Gameday Runsheet</h1>
+        <div class="subline" id="hdrSub">— · —</div>
+      </div>
+    </div>
+    <div class="mode-toggle">
+      <button id="btnModeEdit" class="active">Edit</button>
+      <button id="btnModeGameday">Gameday</button>
+    </div>
+  </div>
+</div>
+
+<div class="wrap" id="app"></div>
+
+<script>
+/* ============================================================
+   STATE
+============================================================ */
+let state = null;
+let mode = 'edit';
+let clockTimer = null;
+let weekIndex = [];       // [{id, label, updatedAt}]
+let activeWeekId = null;
+const LEGACY_KEY = 'runsheet-data-v1';
+const INDEX_KEY = 'runsheet-weeks-index';
+const ACTIVE_KEY = 'runsheet-active-week';
+function weekKey(id){ return 'runsheet-week-'+id; }
+
+function uid(prefix){ return prefix + Math.random().toString(36).slice(2,8); }
+
+/* ------------------------------------------------------------
+   OPTIONAL CLOUD SYNC — shares runsheet data across devices/people
+   Fill in SUPABASE_CONFIG below with your own free Supabase project
+   to turn this on (see the setup notes at the top of this file).
+   Leave it blank and everything still works exactly as before —
+   just saved to this one browser instead of shared with the team.
+------------------------------------------------------------ */
+const SUPABASE_CONFIG = {
+  url: "https://qbedgjeisdrfmadjmgid.supabase.co",
+  anonKey: "sb_publishable_mjr-slGFLeuCmJU-lL-jog_DYLB-3gh"
+};
+let cloudReady = false;
+let db = null;
+
+function cloudConfigured(){
+  return !!(SUPABASE_CONFIG.url && SUPABASE_CONFIG.anonKey);
+}
+
+async function initCloud(){
+  if(!cloudConfigured()) return;
+  if(typeof supabase === 'undefined'){
+    console.log('Supabase library did not load — check your internet connection. Falling back to this device only.');
+    return;
+  }
+  try{
+    db = supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
+    // Quick check that we can actually reach it (and that the kv table exists) before trusting cloud mode.
+    const {error} = await db.from('kv').select('key').limit(1);
+    if(error) throw error;
+    cloudReady = true;
+  }catch(e){
+    console.log('Cloud sync unavailable, using this device only:', e.message);
+    cloudReady = false;
+  }
+}
+
+/* ------------------------------------------------------------
+   STORAGE ADAPTER
+   Priority: cloud (Supabase, if configured and reachable) →
+   Claude's window.storage (only present inside a Claude artifact) →
+   the browser's own localStorage (per device, always available).
+   Pass forceLocal:true for anything that should stay per-device
+   even when cloud sync is on (e.g. which week you're currently
+   looking at — teammates shouldn't have that pulled out from
+   under them when someone else switches tabs).
+------------------------------------------------------------ */
+const hasClaudeStorage = (typeof window !== 'undefined') && !!window.storage;
+
+async function storageGet(key, forceLocal){
+  if(cloudReady && !forceLocal){
+    try{
+      const {data, error} = await db.from('kv').select('value').eq('key', key).maybeSingle();
+      if(error) throw error;
+      return data ? {key, value: data.value, shared:true} : null;
+    }catch(e){ console.error('Cloud read failed, falling back locally:', e); }
+  }
+  if(hasClaudeStorage) return window.storage.get(key, false);
+  const v = localStorage.getItem(key);
+  return v===null ? null : {key, value:v, shared:false};
+}
+async function storageSet(key, value, forceLocal){
+  if(cloudReady && !forceLocal){
+    try{
+      const {error} = await db.from('kv').upsert({key, value, updated_at: new Date().toISOString()});
+      if(error) throw error;
+      return {key, value, shared:true};
+    }catch(e){ console.error('Cloud write failed, falling back locally:', e); }
+  }
+  if(hasClaudeStorage) return window.storage.set(key, value, false);
+  localStorage.setItem(key, value);
+  return {key, value, shared:false};
+}
+async function storageDelete(key, forceLocal){
+  if(cloudReady && !forceLocal){
+    try{
+      const {error} = await db.from('kv').delete().eq('key', key);
+      if(error) throw error;
+      return {key, deleted:true, shared:true};
+    }catch(e){ console.error('Cloud delete failed, falling back locally:', e); }
+  }
+  if(hasClaudeStorage) return window.storage.delete(key, false);
+  localStorage.removeItem(key);
+  return {key, deleted:true, shared:false};
+}
+
+
+/* ------------------------------------------------------------
+   NRL DRAW — South Sydney Rabbitohs
+   Loaded from draw.json (same folder as this file) at page load,
+   so updating the draw is a one-file edit — no code changes and
+   no redeploying this HTML. If draw.json can't be reached (e.g.
+   opened straight from disk, or the file is missing), this falls
+   back to the snapshot embedded below so the page still works.
+------------------------------------------------------------ */
+let DRAW_AS_OF = '3 Aug 2026 (built-in snapshot)';
+let DRAW_SOURCE = 'built-in';
+let SEASON_FIXTURES = [
+  {round:23, opponent:'Eels',      home:true,  date:'Fri 8 Aug 2026',  venue:'Allianz Stadium',   kickoff:'19:35'},
+  {round:24, opponent:'Bulldogs',  home:false, date:'Fri 14 Aug 2026', venue:'Accor Stadium',     kickoff:'20:00'},
+  {round:25, opponent:'Warriors',  home:true,  date:'Sat 22 Aug 2026', venue:'Accor Stadium',     kickoff:'17:30'},
+  {round:26, opponent:'Titans',    home:false, date:'Sat 29 Aug 2026', venue:'Cbus Super Stadium',kickoff:'15:00'},
+  {round:27, opponent:'Roosters',  home:true,  date:'Fri 4 Sep 2026',  venue:'Allianz Stadium',   kickoff:'20:00'}
+];
+
+async function loadDraw(){
+  try{
+    const res = await fetch('./draw.json', {cache:'no-store'});
+    if(!res.ok) throw new Error('draw.json not found (status '+res.status+')');
+    const data = await res.json();
+    if(!Array.isArray(data.fixtures) || data.fixtures.length===0) throw new Error('draw.json had no fixtures');
+    SEASON_FIXTURES = data.fixtures;
+    DRAW_AS_OF = data.asOf || 'unknown date';
+    DRAW_SOURCE = 'draw.json';
+  }catch(e){
+    // Quietly keep the built-in snapshot — this is expected if draw.json
+    // isn't deployed yet, or the page is opened directly from disk.
+    console.log('Using built-in draw snapshot:', e.message);
+    DRAW_SOURCE = 'built-in';
+  }
+}
+
+function weekLabel(s){
+  const m = s.match || {};
+  const t = [m.round, m.opponent ? ('vs '+m.opponent) : ''].filter(Boolean).join(' ').trim();
+  return t || 'Untitled week';
+}
+
+function blankWeekState(){
+  return {
+    match:{ opponent:'', round:'', venue:'', dateStr:'' },
+    anchors:[
+      {id:uid('a'), label:'Jersey Flegg', time:'', active:false},
+      {id:uid('a'), label:'NSW Cup (KOE Cup)', time:'', active:false},
+      {id:uid('a'), label:'NRL Kick Off', time:'', active:true},
+      {id:uid('a'), label:'Gates', time:'', active:true},
+      {id:uid('a'), label:'Corporate Gates', time:'', active:true},
+      {id:uid('a'), label:'Production Meeting', time:'', active:true},
+      {id:uid('a'), label:'Rehearsal & Sound Check', time:'', active:true},
+      {id:uid('a'), label:'Content Check', time:'', active:true},
+      {id:uid('a'), label:'Darcy Arrives', time:'', active:true},
+      {id:uid('a'), label:'Signage Team Arrive', time:'', active:true}
+    ],
+    items:[],
+    packing:[]
+  };
+}
+
+function defaultState(){
+  return {
+    match:{ opponent:'Storm', round:'Round 21', venue:'Accor Stadium', dateStr:'' },
+    anchors:[
+      {id:'a1', label:'Jersey Flegg', time:'', active:false},
+      {id:'a2', label:'NSW Cup (KOE Cup)', time:'', active:false},
+      {id:'a3', label:'NRL Kick Off', time:'20:00', active:true},
+      {id:'a4', label:'Gates', time:'19:00', active:true},
+      {id:'a5', label:'Corporate Gates', time:'18:30', active:true},
+      {id:'a6', label:'Production Meeting', time:'17:00', active:true},
+      {id:'a7', label:'Rehearsal & Sound Check', time:'17:45', active:true},
+      {id:'a8', label:'Content Check', time:'16:15', active:true},
+      {id:'a9', label:'Darcy Arrives', time:'13:30', active:true},
+      {id:'a10', label:'Signage Team Arrive', time:'14:00', active:true}
+    ],
+    items:[
+      {id:uid('i'), mode:'fixed', fixedTime:'13:00', anchorId:'', offsetMin:0, action:'Partnerships team arrive', where:'', who:'ALL', milestone:false},
+      {id:uid('i'), mode:'fixed', fixedTime:'13:20', anchorId:'', offsetMin:0, action:'Unload signage on Level 0 and sort', where:'', who:'ALL', milestone:false},
+      {id:uid('i'), mode:'fixed', fixedTime:'14:00', anchorId:'', offsetMin:0, action:'DTA staff and RISM student arrival and brief', where:'', who:'DH', milestone:false},
+      {id:uid('i'), mode:'fixed', fixedTime:'14:00', anchorId:'', offsetMin:0, action:'Set up U9 vehicle, archway', where:'SE VOM', who:'TL & JB', milestone:false},
+      {id:uid('i'), mode:'fixed', fixedTime:'14:20', anchorId:'', offsetMin:0, action:'Items to be put in place\n\n- Ingenia arriving\n- Budget Direct set up\n- Set up USANA try cards', where:'J/K & A/B', who:'ALL', milestone:false},
+      {id:uid('i'), mode:'fixed', fixedTime:'14:30', anchorId:'', offsetMin:0, action:'DTA boxes moved around stadium', where:'', who:'DTA', milestone:false},
+      {id:uid('i'), mode:'fixed', fixedTime:'15:00', anchorId:'', offsetMin:0, action:'Ingenia caravan arrives', where:'NE VOM', who:'JB', milestone:false},
+      {id:uid('i'), mode:'fixed', fixedTime:'15:00', anchorId:'', offsetMin:0, action:'Start placing bags on seats', where:'', who:'DTA', milestone:false},
+      {id:uid('i'), mode:'fixed', fixedTime:'15:00', anchorId:'', offsetMin:0, action:'DTA start setting up booths', where:'', who:'', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a8', offsetMin:0, action:'Stadium content check', where:'Production Rooms', who:'', milestone:false},
+      {id:uid('i'), mode:'fixed', fixedTime:'16:30', anchorId:'', offsetMin:0, action:'Darcy (BD) arrives', where:'J/K', who:'JB', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a7', offsetMin:-55, action:'LED sign off', where:'Production Room', who:'DH', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a6', offsetMin:0, action:'Production meeting', where:'Stands', who:'', milestone:true},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a7', offsetMin:0, action:'Half time rehearsal and sound check', where:'On Field', who:'', milestone:true},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a5', offsetMin:-30, action:'Static signage sign off\n\nCheck all areas\n- Tunnel\n- Coaches box\n- Warm up room & walkway\n- Above locker changeroom', where:'', who:'DH', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a5', offsetMin:-30, action:'RISM students arrive and briefed', where:'', who:'DH', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a3', offsetMin:-95, action:'Club 19 lineups confirmed and sent to Dein', where:'Tunnel', who:'JB', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a5', offsetMin:0, action:'Corporate gates open', where:'', who:'', milestone:true},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a1', offsetMin:0, action:'Jersey Flegg kick off', where:'', who:'', milestone:true},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a2', offsetMin:0, action:'NSW Cup kick off', where:'', who:'', milestone:true},
+      {id:uid('i'), mode:'fixed', fixedTime:'18:45', anchorId:'', offsetMin:0, action:'JB meet Warren (Budget Direct) for coin toss', where:'Suite 3088', who:'JB', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a3', offsetMin:-60, action:'Coin toss', where:'Tunnel', who:'DH', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a4', offsetMin:0, action:'Gates open', where:'', who:'', milestone:true},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a3', offsetMin:-35, action:'RISM students doing Ingenia catch n keep briefed', where:'Ops Room', who:'DH', milestone:false},
+      {id:uid('i'), mode:'fixed', fixedTime:'19:35', anchorId:'', offsetMin:0, action:'DH meet GOH winner Steve', where:'Aisle 127', who:'DH', milestone:false},
+      {id:uid('i'), mode:'fixed', fixedTime:'19:35', anchorId:'', offsetMin:0, action:'JB/TL meet Budget Direct guests for GOH', where:'Suite 3088', who:'JB & TL', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a3', offsetMin:-10, action:'Run out inflatables ready for run out', where:'', who:'Signage', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a3', offsetMin:0, action:'NRL kick off', where:'', who:'', milestone:true},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a3', offsetMin:45, action:'NRL half time', where:'', who:'', milestone:true},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a3', offsetMin:50, action:'Run out inflatables ready for run out', where:'On field', who:'Signage', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a3', offsetMin:60, action:'NRL 2nd half kick off', where:'', who:'', milestone:true},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a3', offsetMin:105, action:'NRL full time', where:'', who:'', milestone:true},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a3', offsetMin:110, action:'Full time signage and suite pack down\n\n- Goal post pads\n- Corner posts\n- 2 x BD bolsters + ball buckets behind goal posts', where:'On field', who:'ALL', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a3', offsetMin:125, action:'Press conference', where:'Media Room', who:'DH', milestone:false},
+      {id:uid('i'), mode:'anchor', fixedTime:'', anchorId:'a3', offsetMin:170, action:'Activation items taken back to van', where:'Storage Room', who:'DH & JB', milestone:false}
+    ],
+    packing:[
+      {id:uid('p'), text:'Junior Reporter backdrop', done:false}
+    ]
+  };
+}
+
+/* ============================================================
+   PERSISTENCE — one entry per week, plus an index of all weeks
+============================================================ */
+let saveTimer = null;
+
+async function doSave(){
+  try{
+    await storageSet(weekKey(activeWeekId), JSON.stringify(state));
+    const entry = weekIndex.find(w=>w.id===activeWeekId);
+    if(entry){
+      entry.label = weekLabel(state);
+      entry.updatedAt = Date.now();
+    }
+    await storageSet(INDEX_KEY, JSON.stringify(weekIndex));
+    const n = document.getElementById('saveNote');
+    const dest = cloudReady ? 'to the team' : 'to this device';
+    if(n) n.textContent = `Saved ${dest} ` + new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+    const opt = document.querySelector(`#weekSelect option[value="${activeWeekId}"]`);
+    if(opt && entry) opt.textContent = entry.label;
+  }catch(e){
+    const n = document.getElementById('saveNote');
+    if(n) n.textContent = 'Could not save — changes stay on screen only';
+    console.error('Storage error', e);
+  }
+}
+function scheduleSave(){
+  const note = document.getElementById('saveNote');
+  if(note) note.textContent = 'Saving…';
+  clearTimeout(saveTimer);
+  saveTimer = setTimeout(doSave, 500);
+}
+async function flushSave(){
+  clearTimeout(saveTimer);
+  await doSave();
+}
+
+async function loadWeekState(id){
+  try{
+    const r = await storageGet(weekKey(id));
+    if(r && r.value) return JSON.parse(r.value);
+  }catch(e){ /* fall through */ }
+  return blankWeekState();
+}
+async function persistIndex(){
+  try{ await storageSet(INDEX_KEY, JSON.stringify(weekIndex)); }catch(e){ console.error(e); }
+}
+async function persistActive(){
+  try{ await storageSet(ACTIVE_KEY, activeWeekId, true); }catch(e){ console.error(e); }
+}
+
+async function loadAllWeeks(){
+  try{
+    const idxRes = await storageGet(INDEX_KEY);
+    weekIndex = (idxRes && idxRes.value) ? JSON.parse(idxRes.value) : [];
+  }catch(e){ weekIndex = []; }
+
+  if(weekIndex.length === 0){
+    // First run, or upgrading from the old single-runsheet version — migrate it in.
+    let legacy = null;
+    try{
+      const legRes = await storageGet(LEGACY_KEY);
+      if(legRes && legRes.value) legacy = JSON.parse(legRes.value);
+    }catch(e){ /* none */ }
+
+    const id = uid('w');
+    state = legacy || defaultState();
+    weekIndex = [{id, label: weekLabel(state), updatedAt: Date.now()}];
+    activeWeekId = id;
+    try{ await storageSet(weekKey(id), JSON.stringify(state)); }catch(e){}
+    await persistIndex();
+    await persistActive();
+    if(legacy){ try{ await storageDelete(LEGACY_KEY); }catch(e){} }
+    return;
+  }
+
+  try{
+    const actRes = await storageGet(ACTIVE_KEY, true);
+    activeWeekId = (actRes && actRes.value) ? actRes.value : weekIndex[0].id;
+  }catch(e){ activeWeekId = weekIndex[0].id; }
+  if(!weekIndex.find(w=>w.id===activeWeekId)) activeWeekId = weekIndex[0].id;
+  state = await loadWeekState(activeWeekId);
+}
+
+async function switchWeek(id){
+  if(id===activeWeekId) return;
+  await flushSave();
+  activeWeekId = id;
+  await persistActive();
+  state = await loadWeekState(id);
+  setMode(mode); // full re-render of whichever view is showing
+}
+
+async function newWeek(duplicate){
+  await flushSave();
+  const id = uid('w');
+  const newState = duplicate ? JSON.parse(JSON.stringify(state)) : blankWeekState();
+  if(duplicate) newState.packing.forEach(p=>p.done=false);
+  weekIndex.push({id, label: weekLabel(newState), updatedAt: Date.now()});
+  activeWeekId = id;
+  state = newState;
+  try{ await storageSet(weekKey(id), JSON.stringify(state)); }catch(e){}
+  await persistIndex();
+  await persistActive();
+  renderEdit();
+}
+
+async function loadFromDraw(roundNum){
+  const fx = SEASON_FIXTURES.find(f=>f.round===roundNum);
+  if(!fx) return;
+  await flushSave();
+  const id = uid('w');
+  const newState = blankWeekState();
+  newState.match = {
+    opponent: fx.opponent,
+    round: 'Round ' + fx.round,
+    venue: fx.venue,
+    dateStr: fx.date
+  };
+  const ko = newState.anchors.find(a=>a.label==='NRL Kick Off');
+  if(ko && fx.kickoff){ ko.time = fx.kickoff; ko.active = true; }
+  weekIndex.push({id, label: weekLabel(newState), updatedAt: Date.now()});
+  activeWeekId = id;
+  state = newState;
+  try{ await storageSet(weekKey(id), JSON.stringify(state)); }catch(e){}
+  await persistIndex();
+  await persistActive();
+  renderEdit();
+  if(!fx.kickoff){
+    alert(`Kick off for Round ${fx.round} vs ${fx.opponent} isn't locked in by the broadcast schedule yet — add it under Key Timings once it's confirmed and everything linked to it will fall into place.`);
+  }
+}
+
+async function deleteWeek(id){
+  if(weekIndex.length<=1){
+    alert("This is your only saved week — clear it instead of deleting it.");
+    return;
+  }
+  const entry = weekIndex.find(w=>w.id===id);
+  if(!confirm(`Delete "${entry?entry.label:'this week'}"? This can't be undone.`)) return;
+  try{ await storageDelete(weekKey(id)); }catch(e){}
+  weekIndex = weekIndex.filter(w=>w.id!==id);
+  await persistIndex();
+  if(activeWeekId===id){
+    activeWeekId = weekIndex[0].id;
+    await persistActive();
+    state = await loadWeekState(activeWeekId);
+  }
+  renderEdit();
+}
+
+/* ============================================================
+   TIME HELPERS
+============================================================ */
+function toMin(t){
+  if(!t) return null;
+  const p = t.split(':');
+  if(p.length<2) return null;
+  const h = parseInt(p[0],10), m = parseInt(p[1],10);
+  if(isNaN(h)||isNaN(m)) return null;
+  return h*60+m;
+}
+function fromMin(mins){
+  mins = ((mins % 1440) + 1440) % 1440;
+  const h = Math.floor(mins/60), m = mins%60;
+  return String(h).padStart(2,'0')+':'+String(m).padStart(2,'0');
+}
+function fmt12(t){
+  const mins = toMin(t);
+  if(mins===null) return '--:--';
+  let h = Math.floor(mins/60), m = mins%60;
+  const ap = h>=12 ? 'PM':'AM';
+  h = h%12; if(h===0) h=12;
+  return h+':'+String(m).padStart(2,'0')+' '+ap;
+}
+function getAnchor(id){ return state.anchors.find(a=>a.id===id); }
+function computeItemMin(item){
+  if(item.mode==='fixed'){
+    return toMin(item.fixedTime);
+  }else{
+    const anc = getAnchor(item.anchorId);
+    if(!anc || !anc.active) return null;
+    const base = toMin(anc.time);
+    if(base===null) return null;
+    return base + (parseInt(item.offsetMin,10)||0);
+  }
+}
+function nowMin(){
+  const d = new Date();
+  return d.getHours()*60 + d.getMinutes();
+}
+
+/* ============================================================
+   RENDER: EDIT MODE
+============================================================ */
+function renderEdit(){
+  const app = document.getElementById('app');
+  app.innerHTML = `
+    <div class="card" id="weekSwitchCard"></div>
+    <div class="card" id="matchCard"></div>
+    <div class="card" id="anchorCard">
+      <h2>Key timings</h2>
+      <div class="card-sub">These are your anchors — change one here and every runsheet item linked to it updates automatically.</div>
+      <div id="anchorList"></div>
+      <button class="btn btn-ghost add-row-btn" id="addAnchorBtn">+ Add key timing</button>
+    </div>
+    <div class="card" id="itemsCard">
+      <h2>Runsheet</h2>
+      <div class="card-sub">Set each item's time as a fixed clock time, or relative to a key timing above (e.g. "Kick off − 30 min"). Toggle "milestone" for the big markers like kick off and half time.</div>
+      <div id="itemList"></div>
+      <button class="btn btn-primary add-row-btn" id="addItemBtn">+ Add runsheet item</button>
+    </div>
+    <div class="card" id="packCard">
+      <h2>Packing list</h2>
+      <div class="card-sub">Ticked off on gameday, edited here.</div>
+      <div id="packList"></div>
+      <button class="btn btn-ghost add-row-btn" id="addPackBtn">+ Add item</button>
+    </div>
+    <div class="footer-actions">
+      <span class="save-note" id="saveNote">All changes saved automatically</span>
+      <button class="clear-link" id="clearAllBtn">Clear this week and start over</button>
+    </div>
+  `;
+  renderWeekSwitcher();
+  renderMatchCard();
+  renderAnchors();
+  renderItemsEdit();
+  renderPackEdit();
+
+  document.getElementById('addAnchorBtn').onclick = ()=>{
+    state.anchors.push({id:uid('a'), label:'New timing', time:'', active:true});
+    renderAnchors(); refreshComputedBadges(); scheduleSave();
+  };
+  document.getElementById('addItemBtn').onclick = ()=>{
+    state.items.push({id:uid('i'), mode:'fixed', fixedTime:'', anchorId:(state.anchors[0]?state.anchors[0].id:''), offsetMin:0, action:'', where:'', who:'', milestone:false});
+    renderItemsEdit(); scheduleSave();
+  };
+  document.getElementById('addPackBtn').onclick = ()=>{
+    state.packing.push({id:uid('p'), text:'', done:false});
+    renderPackEdit(); scheduleSave();
+  };
+  document.getElementById('clearAllBtn').onclick = ()=>{
+    if(confirm('This clears every key timing, runsheet item and packing item on this week, and cannot be undone. Continue?')){
+      state = blankWeekState();
+      renderEdit();
+      scheduleSave();
+    }
+  };
+}
+
+function renderWeekSwitcher(){
+  const c = document.getElementById('weekSwitchCard');
+  const sorted = [...weekIndex].sort((a,b)=>b.updatedAt-a.updatedAt);
+  const syncBadge = cloudConfigured()
+    ? (cloudReady
+        ? `<div style="font-size:12px;color:#1B4536;background:#E4EFE8;border:1px solid #BFDBCB;padding:6px 10px;border-radius:6px;margin-bottom:12px;">🟢 Synced with your team's cloud — everyone sees the same weeks.</div>`
+        : `<div style="font-size:12px;color:#5E0E1D;background:#F6E4E7;border:1px solid #E3B7BE;padding:6px 10px;border-radius:6px;margin-bottom:12px;">🔴 Could not reach the cloud — saving to this device only for now.</div>`)
+    : `<div style="font-size:12px;color:var(--ink-soft);background:#F0EAD8;padding:6px 10px;border-radius:6px;margin-bottom:12px;">⚪ Cloud sync isn't set up — this is only saved on this device. See the setup note in index.html to share it with your team.</div>`;
+  c.innerHTML = `
+    <h2>Weeks</h2>
+    ${syncBadge}
+    <div class="card-sub">Switch between saved weeks, duplicate last week as a starting point, or start fresh.</div>
+    <div class="field">
+      <label>Viewing</label>
+      <select id="weekSelect">
+        ${sorted.map(w=>`<option value="${w.id}" ${w.id===activeWeekId?'selected':''}>${escAttr(w.label)}</option>`).join('')}
+      </select>
+    </div>
+    <div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:6px;">
+      <button class="btn btn-primary" id="newWeekBtn">+ New blank week</button>
+      <button class="btn btn-ghost" id="dupWeekBtn">⧉ Duplicate this week</button>
+      <button class="btn btn-ghost" id="delWeekBtn" style="color:var(--cardinal);border-color:var(--cardinal);">🗑 Delete this week</button>
+    </div>
+    <div style="margin-top:16px;padding-top:14px;border-top:1px solid var(--line);">
+      <label>Load from NRL draw</label>
+      <div class="card-sub" style="margin-bottom:8px;" id="drawStatusNote">
+        ${DRAW_SOURCE==='draw.json'
+          ? `Synced from draw.json — as of ${escHtml(DRAW_AS_OF)}.`
+          : `Using the built-in snapshot (as of ${escHtml(DRAW_AS_OF)}) — add a draw.json file next to this page to update fixtures without touching the code.`}
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+        <select id="drawSelect" style="flex:1; min-width:220px;">
+          ${SEASON_FIXTURES.map(fx=>`<option value="${fx.round}">Round ${fx.round} vs ${fx.opponent} — ${fx.date}${fx.kickoff ? '' : ' (kick off TBC)'}</option>`).join('')}
+        </select>
+        <button class="btn btn-ghost" id="loadDrawBtn">Create week from fixture</button>
+        <button class="btn btn-ghost" id="refreshDrawBtn" title="Re-fetch draw.json">↻ Refresh draw</button>
+      </div>
+    </div>
+  `;
+  document.getElementById('weekSelect').onchange = (e)=> switchWeek(e.target.value);
+  document.getElementById('newWeekBtn').onclick = ()=> newWeek(false);
+  document.getElementById('dupWeekBtn').onclick = ()=> newWeek(true);
+  document.getElementById('delWeekBtn').onclick = ()=> deleteWeek(activeWeekId);
+  document.getElementById('loadDrawBtn').onclick = ()=> loadFromDraw(parseInt(document.getElementById('drawSelect').value,10));
+  document.getElementById('refreshDrawBtn').onclick = async ()=>{
+    const note = document.getElementById('drawStatusNote');
+    note.textContent = 'Checking draw.json…';
+    await loadDraw();
+    renderWeekSwitcher();
+  };
+}
+
+function renderMatchCard(){
+  const c = document.getElementById('matchCard');
+  c.innerHTML = `
+    <h2>Match details</h2>
+    <div class="card-sub">Used for the header title on both views.</div>
+    <div class="field-row">
+      <div class="field"><label>Opponent</label><input type="text" id="mOpp" value="${escAttr(state.match.opponent)}"></div>
+      <div class="field"><label>Round</label><input type="text" id="mRound" value="${escAttr(state.match.round)}"></div>
+      <div class="field"><label>Venue</label><input type="text" id="mVenue" value="${escAttr(state.match.venue)}"></div>
+      <div class="field"><label>Date</label><input type="text" id="mDate" placeholder="e.g. Sat 8 Aug" value="${escAttr(state.match.dateStr)}"></div>
+    </div>
+  `;
+  ['mOpp','mRound','mVenue','mDate'].forEach(id=>{
+    document.getElementById(id).oninput = (e)=>{
+      const map = {mOpp:'opponent', mRound:'round', mVenue:'venue', mDate:'dateStr'};
+      state.match[map[id]] = e.target.value;
+      updateHeader();
+      scheduleSave();
+    };
+  });
+}
+
+function renderAnchors(){
+  const list = document.getElementById('anchorList');
+  if(state.anchors.length===0){
+    list.innerHTML = `<div class="empty-state">No key timings yet — add one to anchor your runsheet items to it.</div>`;
+    return;
+  }
+  list.innerHTML = state.anchors.map(a=>`
+    <div class="anchor-row" data-id="${a.id}">
+      <div class="anchor-active"><input type="checkbox" class="anc-active" ${a.active?'checked':''} title="In use this week"></div>
+      <input type="text" class="anc-label" value="${escAttr(a.label)}" placeholder="Label">
+      <input type="time" class="anc-time" value="${a.time||''}">
+      <span style="font-size:11px;color:var(--ink-soft);">${a.active?'in use':'not this week'}</span>
+      <button class="btn-icon btn-danger anc-del" title="Delete">✕</button>
+    </div>
+  `).join('');
+  list.querySelectorAll('.anchor-row').forEach(row=>{
+    const id = row.dataset.id;
+    const anc = getAnchor(id);
+    row.querySelector('.anc-label').oninput = (e)=>{ anc.label = e.target.value; refreshComputedBadges(); scheduleSave(); };
+    row.querySelector('.anc-time').oninput = (e)=>{ anc.time = e.target.value; refreshComputedBadges(); scheduleSave(); };
+    row.querySelector('.anc-active').onchange = (e)=>{
+      anc.active = e.target.checked;
+      row.querySelector('span').textContent = anc.active ? 'in use' : 'not this week';
+      refreshComputedBadges(); scheduleSave();
+    };
+    row.querySelector('.anc-del').onclick = ()=>{
+      if(confirm(`Remove "${anc.label}"? Items linked to it will need a new time.`)){
+        state.anchors = state.anchors.filter(x=>x.id!==id);
+        renderAnchors(); renderItemsEdit(); scheduleSave();
+      }
+    };
+  });
+}
+
+function anchorOptions(selectedId){
+  return state.anchors.map(a=>`<option value="${a.id}" ${a.id===selectedId?'selected':''}>${escAttr(a.label)}</option>`).join('');
+}
+
+function renderItemsEdit(){
+  const list = document.getElementById('itemList');
+  if(state.items.length===0){
+    list.innerHTML = `<div class="empty-state">No runsheet items yet — add your first one below.</div>`;
+    return;
+  }
+  list.innerHTML = state.items.map((it,idx)=>{
+    const mins = computeItemMin(it);
+    const badge = mins===null ? `<span class="item-time-badge na">N/A</span>` : `<span class="item-time-badge" data-computed="${it.id}">${fromMin(mins)}</span>`;
+    return `
+    <div class="item-edit" data-id="${it.id}">
+      <div class="item-edit-top">
+        ${badge}
+        <div class="item-controls">
+          <button class="btn-icon it-up" title="Move up" ${idx===0?'disabled':''}>↑</button>
+          <button class="btn-icon it-down" title="Move down" ${idx===state.items.length-1?'disabled':''}>↓</button>
+          <button class="btn-icon btn-danger it-del" title="Delete">✕</button>
+        </div>
+      </div>
+      <div class="time-mode-row">
+        <div class="field">
+          <label>Time is</label>
+          <select class="it-mode">
+            <option value="fixed" ${it.mode==='fixed'?'selected':''}>Fixed clock time</option>
+            <option value="anchor" ${it.mode==='anchor'?'selected':''}>Relative to a key timing</option>
+          </select>
+        </div>
+        ${it.mode==='fixed' ? `
+        <div class="field"><label>Time</label><input type="time" class="it-fixedtime" value="${it.fixedTime||''}"></div>
+        ` : `
+        <div class="field"><label>Key timing</label><select class="it-anchor">${anchorOptions(it.anchorId)}</select></div>
+        <div class="field"><label>Offset (min, +/-)</label><input type="number" class="it-offset" value="${it.offsetMin||0}"></div>
+        `}
+      </div>
+      <div class="field">
+        <label>Action</label>
+        <textarea class="it-action" placeholder="What happens">${escHtml(it.action)}</textarea>
+      </div>
+      <div class="who-where-row">
+        <div class="field"><label>Where</label><input type="text" class="it-where" value="${escAttr(it.where)}"></div>
+        <div class="field"><label>Who</label><input type="text" class="it-who" value="${escAttr(it.who)}"></div>
+      </div>
+      <div class="milestone-toggle">
+        <input type="checkbox" class="it-milestone" ${it.milestone?'checked':''}>
+        <label style="margin:0;text-transform:none;font-weight:600;letter-spacing:0;">Milestone (shown as a big marker on gameday, e.g. kick off, gates)</label>
+      </div>
+    </div>
+  `;
+  }).join('');
+
+  list.querySelectorAll('.item-edit').forEach(row=>{
+    const id = row.dataset.id;
+    const it = state.items.find(x=>x.id===id);
+    row.querySelector('.it-mode').onchange = (e)=>{ it.mode = e.target.value; renderItemsEdit(); scheduleSave(); };
+    const ft = row.querySelector('.it-fixedtime');
+    if(ft) ft.oninput = (e)=>{ it.fixedTime = e.target.value; refreshComputedBadges(); scheduleSave(); };
+    const ancSel = row.querySelector('.it-anchor');
+    if(ancSel) ancSel.onchange = (e)=>{ it.anchorId = e.target.value; refreshComputedBadges(); scheduleSave(); };
+    const offInp = row.querySelector('.it-offset');
+    if(offInp) offInp.oninput = (e)=>{ it.offsetMin = parseInt(e.target.value,10)||0; refreshComputedBadges(); scheduleSave(); };
+    row.querySelector('.it-action').oninput = (e)=>{ it.action = e.target.value; scheduleSave(); };
+    row.querySelector('.it-where').oninput = (e)=>{ it.where = e.target.value; scheduleSave(); };
+    row.querySelector('.it-who').oninput = (e)=>{ it.who = e.target.value; scheduleSave(); };
+    row.querySelector('.it-milestone').onchange = (e)=>{ it.milestone = e.target.checked; scheduleSave(); };
+    row.querySelector('.it-del').onclick = ()=>{
+      state.items = state.items.filter(x=>x.id!==id);
+      renderItemsEdit(); scheduleSave();
+    };
+    const upBtn = row.querySelector('.it-up');
+    const downBtn = row.querySelector('.it-down');
+    if(upBtn) upBtn.onclick = ()=>{ moveItem(id,-1); };
+    if(downBtn) downBtn.onclick = ()=>{ moveItem(id,1); };
+  });
+}
+
+function moveItem(id, dir){
+  const idx = state.items.findIndex(x=>x.id===id);
+  const swapIdx = idx+dir;
+  if(swapIdx<0 || swapIdx>=state.items.length) return;
+  const tmp = state.items[idx];
+  state.items[idx] = state.items[swapIdx];
+  state.items[swapIdx] = tmp;
+  renderItemsEdit();
+  scheduleSave();
+}
+
+function refreshComputedBadges(){
+  state.items.forEach(it=>{
+    const el = document.querySelector(`[data-computed="${it.id}"]`);
+    if(!el) return;
+    const mins = computeItemMin(it);
+    if(mins===null){
+      el.textContent = 'N/A';
+      el.classList.add('na');
+    }else{
+      el.textContent = fromMin(mins);
+      el.classList.remove('na');
+    }
+  });
+}
+
+function renderPackEdit(){
+  const list = document.getElementById('packList');
+  if(state.packing.length===0){
+    list.innerHTML = `<div class="empty-state">Nothing on the packing list yet.</div>`;
+    return;
+  }
+  list.innerHTML = state.packing.map(p=>`
+    <div class="pack-row" data-id="${p.id}">
+      <input type="text" class="pk-text" value="${escAttr(p.text)}" placeholder="Item">
+      <button class="btn-icon btn-danger pk-del" title="Delete">✕</button>
+    </div>
+  `).join('');
+  list.querySelectorAll('.pack-row').forEach(row=>{
+    const id = row.dataset.id;
+    const p = state.packing.find(x=>x.id===id);
+    row.querySelector('.pk-text').oninput = (e)=>{ p.text = e.target.value; scheduleSave(); };
+    row.querySelector('.pk-del').onclick = ()=>{
+      state.packing = state.packing.filter(x=>x.id!==id);
+      renderPackEdit(); scheduleSave();
+    };
+  });
+}
+
+/* ============================================================
+   RENDER: GAMEDAY MODE
+============================================================ */
+function renderGameday(){
+  const app = document.getElementById('app');
+  const now = nowMin();
+
+  const sortable = state.items
+    .map(it=>({it, mins:computeItemMin(it)}))
+    .filter(x=>x.mins!==null)
+    .sort((a,b)=>a.mins-b.mins);
+
+  // find current (last item at/before now) and next (first after now)
+  let currentIdx = -1;
+  for(let i=0;i<sortable.length;i++){
+    if(sortable[i].mins<=now) currentIdx = i;
+  }
+  const nextEntry = sortable.find(x=>x.mins>now);
+
+  app.innerHTML = `
+    <div class="gd-clock-bar">
+      <div>
+        <div style="font-size:11px;text-transform:uppercase;letter-spacing:0.08em;color:#C9D3CB;margin-bottom:2px;">Now</div>
+        <div class="gd-clock" id="gdClock"></div>
+      </div>
+      <div class="gd-next">
+        ${nextEntry ? `
+          <div class="eyebrow">Next up</div>
+          <div class="next-name">${escHtml(firstLine(nextEntry.it.action)||'—')}</div>
+          <div class="next-time">${fromMin(nextEntry.mins)} · in ${nextEntry.mins-now} min</div>
+        ` : `<div class="eyebrow">That's the last item on the sheet</div>`}
+      </div>
+    </div>
+    <div class="card">
+      <div class="timeline" id="timeline"></div>
+    </div>
+    <div class="card">
+      <h2>Packing list</h2>
+      <div class="gd-pack" id="gdPack"></div>
+    </div>
+    <div class="footer-actions">
+      <button class="btn btn-ghost" id="printBtn">Print this view</button>
+      <span class="save-note" id="saveNote2"></span>
+    </div>
+  `;
+
+  const tl = document.getElementById('timeline');
+  if(sortable.length===0){
+    tl.innerHTML = `<div class="empty-state">No timed items yet — add some in Edit mode.</div>`;
+  }else{
+    tl.innerHTML = sortable.map((x,i)=>{
+      const isPast = i<currentIdx;
+      const isNow = i===currentIdx;
+      const cls = ['gd-item'];
+      if(x.it.milestone) cls.push('milestone');
+      if(isPast) cls.push('past');
+      if(isNow) cls.push('now');
+      const meta = [];
+      if(x.it.where) meta.push(`📍 ${escHtml(x.it.where)}`);
+      if(x.it.who) meta.push(`👤 ${escHtml(x.it.who)}`);
+      return `
+        <div class="${cls.join(' ')}">
+          <div class="gd-time">${fromMin(x.mins)}</div>
+          <div class="gd-body">
+            <div class="gd-action">${escHtml(x.it.action)}${isNow?'<span class="now-tag">NOW</span>':''}</div>
+            ${meta.length? `<div class="gd-meta">${meta.map(m=>`<span>${m}</span>`).join('')}</div>` : ''}
+          </div>
+        </div>
+      `;
+    }).join('');
+  }
+
+  const pk = document.getElementById('gdPack');
+  if(state.packing.length===0){
+    pk.innerHTML = `<div class="empty-state">Nothing to pack.</div>`;
+  }else{
+    pk.innerHTML = state.packing.map(p=>`
+      <div class="gd-pack-row ${p.done?'checked':''}" data-id="${p.id}">
+        <input type="checkbox" class="pk-done" ${p.done?'checked':''}>
+        <span>${escHtml(p.text)||'(untitled item)'}</span>
+      </div>
+    `).join('');
+    pk.querySelectorAll('.gd-pack-row').forEach(row=>{
+      const id = row.dataset.id;
+      row.querySelector('.pk-done').onchange = (e)=>{
+        const p = state.packing.find(x=>x.id===id);
+        p.done = e.target.checked;
+        row.classList.toggle('checked', p.done);
+        scheduleSave();
+      };
+    });
+  }
+
+  document.getElementById('printBtn').onclick = ()=> window.print();
+
+  updateClock();
+}
+
+function firstLine(s){
+  if(!s) return '';
+  return s.split('\n')[0];
+}
+
+function updateClock(){
+  const el = document.getElementById('gdClock');
+  if(!el) return;
+  const d = new Date();
+  el.textContent = d.toLocaleTimeString([], {hour:'2-digit', minute:'2-digit', second:'2-digit'});
+}
+
+/* ============================================================
+   HEADER / MODE SWITCHING
+============================================================ */
+function updateHeader(){
+  const m = state.match;
+  const title = [m.round, m.opponent ? ('vs '+m.opponent) : ''].filter(Boolean).join(' ') || 'Gameday Runsheet';
+  document.getElementById('hdrTitle').textContent = title || 'Gameday Runsheet';
+  document.getElementById('hdrSub').textContent = [m.venue, m.dateStr].filter(Boolean).join(' · ') || '— · —';
+}
+
+function setMode(newMode){
+  mode = newMode;
+  document.getElementById('btnModeEdit').classList.toggle('active', mode==='edit');
+  document.getElementById('btnModeGameday').classList.toggle('active', mode==='gameday');
+  clearInterval(clockTimer);
+  clearInterval(clockTimer2);
+  if(mode==='edit'){
+    renderEdit();
+  }else{
+    renderGameday();
+    clockTimer = setInterval(()=>{
+      updateClock();
+    }, 1000);
+    clockTimer2 = setInterval(async ()=>{
+      if(cloudReady){
+        try{ state = await loadWeekState(activeWeekId); }
+        catch(e){ console.error('Could not refresh from cloud', e); }
+      }
+      renderGameday();
+    }, cloudReady ? 15000 : 30000);
+  }
+  updateHeader();
+}
+let clockTimer2 = null;
+
+/* ============================================================
+   UTIL
+============================================================ */
+function escHtml(s){
+  if(s===undefined||s===null) return '';
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+}
+function escAttr(s){
+  return escHtml(s).replace(/"/g,'&quot;');
+}
+
+/* ============================================================
+   INIT
+============================================================ */
+async function init(){
+  document.getElementById('app').innerHTML = `<div class="empty-state">Loading your runsheet…</div>`;
+  await initCloud();
+  await Promise.all([loadAllWeeks(), loadDraw()]);
+  document.getElementById('btnModeEdit').onclick = ()=>setMode('edit');
+  document.getElementById('btnModeGameday').onclick = ()=>setMode('gameday');
+  setMode('edit');
+}
+init();
+</script>
+</body>
+</html>
