@@ -507,6 +507,7 @@ async function doSave(){
     const entry = weekIndex.find(w=>w.id===activeWeekId);
     if(entry){
       entry.label = weekLabel(state);
+      entry.date = toISODate(state.match.dateStr);
       entry.updatedAt = Date.now();
     }
     await storageSet(INDEX_KEY, JSON.stringify(weekIndex));
@@ -563,6 +564,30 @@ async function persistActive(){
   try{ await storageSet(ACTIVE_KEY, activeWeekId, true); }catch(e){ console.error(e); }
 }
 
+// Picks the most relevant week to land on: the closest upcoming match
+// date, or if there's nothing upcoming, the most recent past one. Runs
+// fresh on every page load so reopening the site (any device, any gap
+// in time) lands on the right week without depending on anything being
+// remembered locally.
+function pickCurrentWeekId(){
+  if(weekIndex.length===0) return null;
+  const dated = weekIndex.filter(w=>w.date);
+  if(dated.length===0){
+    return [...weekIndex].sort((a,b)=>b.updatedAt-a.updatedAt)[0].id;
+  }
+  const now = new Date();
+  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+  let bestUpcoming=null, bestUpcomingDiff=Infinity;
+  let bestPast=null, bestPastDiff=-Infinity;
+  dated.forEach(w=>{
+    const d = new Date(w.date+'T00:00:00');
+    const diffDays = Math.round((d-todayStart)/86400000);
+    if(diffDays>=0 && diffDays<bestUpcomingDiff){ bestUpcomingDiff=diffDays; bestUpcoming=w; }
+    if(diffDays<0 && diffDays>bestPastDiff){ bestPastDiff=diffDays; bestPast=w; }
+  });
+  return (bestUpcoming || bestPast).id;
+}
+
 async function loadAllWeeks(){
   try{
     const idxRes = await storageGet(INDEX_KEY);
@@ -580,7 +605,7 @@ async function loadAllWeeks(){
     const id = uid('w');
     state = legacy || defaultState();
     ensureAnchorItems(state);
-    weekIndex = [{id, label: weekLabel(state), updatedAt: Date.now()}];
+    weekIndex = [{id, label: weekLabel(state), date: toISODate(state.match.dateStr), updatedAt: Date.now()}];
     activeWeekId = id;
     try{ await storageSet(weekKey(id), JSON.stringify(state)); }catch(e){}
     await persistIndex();
@@ -589,12 +614,22 @@ async function loadAllWeeks(){
     return;
   }
 
-  try{
-    const actRes = await storageGet(ACTIVE_KEY, true);
-    activeWeekId = (actRes && actRes.value) ? actRes.value : weekIndex[0].id;
-  }catch(e){ activeWeekId = weekIndex[0].id; }
-  if(!weekIndex.find(w=>w.id===activeWeekId)) activeWeekId = weekIndex[0].id;
+  // Backfill "date" on index entries saved before this feature existed.
+  let indexChanged = false;
+  for(const w of weekIndex){
+    if(w.date===undefined){
+      try{
+        const s = await loadWeekState(w.id);
+        w.date = s ? toISODate(s.match.dateStr) : '';
+      }catch(e){ w.date=''; }
+      indexChanged = true;
+    }
+  }
+  if(indexChanged) await persistIndex();
+
+  activeWeekId = pickCurrentWeekId() || weekIndex[0].id;
   state = await loadWeekState(activeWeekId);
+  await persistActive();
 }
 
 async function switchWeek(id){
@@ -611,7 +646,7 @@ async function newWeek(duplicate){
   const id = uid('w');
   const newState = duplicate ? JSON.parse(JSON.stringify(state)) : blankWeekState();
   if(duplicate) newState.packing.forEach(p=>p.done=false);
-  weekIndex.push({id, label: weekLabel(newState), updatedAt: Date.now()});
+  weekIndex.push({id, label: weekLabel(newState), date: toISODate(newState.match.dateStr), updatedAt: Date.now()});
   activeWeekId = id;
   state = newState;
   try{ await storageSet(weekKey(id), JSON.stringify(state)); }catch(e){}
@@ -634,7 +669,7 @@ async function loadFromDraw(roundNum){
   };
   const ko = newState.anchors.find(a=>a.label==='NRL Kick Off');
   if(ko && fx.kickoff){ ko.time = fx.kickoff; ko.active = true; }
-  weekIndex.push({id, label: weekLabel(newState), updatedAt: Date.now()});
+  weekIndex.push({id, label: weekLabel(newState), date: toISODate(newState.match.dateStr), updatedAt: Date.now()});
   activeWeekId = id;
   state = newState;
   try{ await storageSet(weekKey(id), JSON.stringify(state)); }catch(e){}
@@ -657,7 +692,7 @@ async function deleteWeek(id){
   weekIndex = weekIndex.filter(w=>w.id!==id);
   await persistIndex();
   if(activeWeekId===id){
-    activeWeekId = weekIndex[0].id;
+    activeWeekId = pickCurrentWeekId() || weekIndex[0].id;
     await persistActive();
     state = await loadWeekState(activeWeekId);
   }
